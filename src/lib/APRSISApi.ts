@@ -1,6 +1,7 @@
 import { filter } from "cheerio/dist/commonjs/api/traversing";
 import Balloon from "../interface/Balloon";
 import net from "net";
+import logger from "../utils/logger";
 
 export default class APRSISApi {
     private connection = new net.Socket();
@@ -110,6 +111,8 @@ export default class APRSISApi {
                 filter.join("/") +
                 "\r\n"
         );
+
+        return new Promise<void>((r) => this.connection.on("close", r));
     }
 
     async sendStatus(callsign: string, status: string) {

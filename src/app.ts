@@ -16,6 +16,15 @@ let settings: Settings;
 const sondehubApi = new SondehubApi();
 const aprsisApi = new APRSISApi();
 
+const ignoredStations = [
+    "OK2ZAW-17", // repeats everything and delete NOHUB
+    "OK1CMJ-14", // repeats everything and delete NOHUB
+    "OK2ULQ-11", // CRC packets
+    "OK2R-12", // CRC packets
+    "OK1TPG-27", // CRC packets
+    "SR9SRC-2", // short packet
+];
+
 async function loadSettings() {
     settings = JSON.parse(await readFile("./settings.json", "utf-8"));
 }
@@ -67,14 +76,48 @@ async function processPacket(packet: string) {
 
     if (packet.includes("TCPIP")) return;
 
+    const isNoHub = packet.includes("NOHUB");
+
+    if (!isNoHub) {
+        logger.warn(`That's not NOHUB packet, we must ignore that: ${packet}`);
+        return;
+    }
+
+    const isFromIgnoredStation = !!ignoredStations.find((station) =>
+        packet.includes(station)
+    );
+
+    if (isFromIgnoredStation) {
+        logger.warn(
+            `Packet from ignored station, we don't want that!: ${packet}`
+        );
+        return;
+    }
+
     if (
         packet.includes("SNR") ||
         packet.includes("RSSI") ||
         packet.includes("snr") ||
-        packet.includes("rssi")
+        packet.includes("rssi") ||
+        packet.includes("DP_RSSI") ||
+        packet.includes(" DS ")
     ) {
-        logger.info(`Skipping modified packet: ${packet}`);
-        return;
+        logger.info(`Got modified packet: ${packet}`);
+
+        if (packet.includes("rssi: ")) {
+            packet = packet.split(" rssi:")[0];
+            packet = packet.split("rssi:")[0];
+        } else if (packet.includes("DP_RSSI: ")) {
+            packet = packet.split(" DP_RSSI:")[0];
+        } else if (packet.includes(" DS ")) {
+            packet = packet.split(" DS ")[0];
+        } else if (packet.includes("  SNR=")) {
+            packet = packet.split("  SNR=")[0];
+        } else {
+            return;
+        }
+
+        logger.info(`Packet cleaned as: ${packet}`);
     }
 
     if (!packet.includes("/P")) {
@@ -91,13 +134,6 @@ async function processPacket(packet: string) {
     if (!balloon.active) return;
 
     logger.info(`Got packet: ${packet}`);
-
-    const isNoHub = packet.includes("NOHUB");
-
-    if (!isNoHub) {
-        logger.warn(`That's not NOHUB packet, we must ignore that: ${packet}`);
-        return;
-    }
 
     const receiver = packet.match(/,([a-zA-Z0-9-]+)\:./)[1];
 
@@ -190,17 +226,17 @@ async function processPacket(packet: string) {
         switch (frequency) {
             case 1:
                 telemetry.frequency = 433.775;
-                telemetry.speed = 300;
+                telemetry.lora_speed = 300;
                 telemetry.modulation = "LoRa APRS";
                 break;
             case 2:
                 telemetry.frequency = 434.855;
-                telemetry.speed = 1200;
+                telemetry.lora_speed = 1200;
                 telemetry.modulation = "LoRa APRS";
                 break;
             case 3:
                 telemetry.frequency = 439.9125;
-                telemetry.speed = 300;
+                telemetry.lora_speed = 300;
                 telemetry.modulation = "LoRa APRS";
                 break;
             case 4:
@@ -260,5 +296,9 @@ async function processPacket(packet: string) {
 
     const callsigns = settings.balloons.map((balloon) => balloon.hamCallsign);
 
-    await aprsisApi.startStream(settings.callsign, callsigns);
+    while (true) {
+        await aprsisApi.startStream(settings.callsign, callsigns);
+
+        logger.debug(`Reconnecting to APRSIS..`);
+    }
 })();

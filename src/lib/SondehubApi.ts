@@ -38,7 +38,7 @@ export interface TelemetryPayload {
     days_aloft?: number;
     launch_date?: string;
     frame: number;
-    speed?: number;
+    lora_speed?: number;
 }
 
 const BASE_URL = "https://api.v2.sondehub.org";
