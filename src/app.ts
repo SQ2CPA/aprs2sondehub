@@ -3,6 +3,7 @@ import APRSISApi from "./lib/APRSISApi";
 import { readFile } from "fs/promises";
 import Settings from "./interface/Settings";
 import { SOFTWARE_NAME, SOFTWARE_VERSION } from "./consts";
+import logger from "./utils/logger";
 
 interface Location {
     latitude: number;
@@ -62,7 +63,7 @@ async function processPacket(packet: string) {
 
     if (packet.includes("\n")) return;
 
-    console.log(packet);
+    logger.debug(packet);
 
     if (packet.includes("TCPIP")) return;
 
@@ -72,12 +73,12 @@ async function processPacket(packet: string) {
         packet.includes("snr") ||
         packet.includes("rssi")
     ) {
-        console.log(`Skipping modified packet: ${packet}`);
+        logger.info(`Skipping modified packet: ${packet}`);
         return;
     }
 
     if (!packet.includes("/P")) {
-        console.log(`Skipping broken packet: ${packet}`);
+        logger.info(`Skipping broken packet: ${packet}`);
         return;
     }
 
@@ -89,12 +90,12 @@ async function processPacket(packet: string) {
 
     if (!balloon.active) return;
 
-    console.log(`Got packet: ${packet}`);
+    logger.info(`Got packet: ${packet}`);
 
     const isNoHub = packet.includes("NOHUB");
 
     if (!isNoHub) {
-        console.log(`That's not NOHUB packet, we must ignore that: ${packet}`);
+        logger.warn(`That's not NOHUB packet, we must ignore that: ${packet}`);
         return;
     }
 
@@ -144,7 +145,7 @@ async function processPacket(packet: string) {
     const lastKnownLocation = lastKnownLocations[balloon.hamCallsign];
 
     if (!lastKnownLocation) {
-        console.log(
+        logger.warn(
             `Got packet without location for: ${balloon.payload} but we'll skip due to lack of known location`
         );
         return;
@@ -155,7 +156,7 @@ async function processPacket(packet: string) {
         altitudeInFeet = altitudeInMeters * 3.281;
     }
 
-    console.log(`Got packet for: ${balloon.payload}`);
+    logger.info(`Got packet for: ${balloon.payload}`);
 
     const telemetry: TelemetryPayload = {
         software_name: SOFTWARE_NAME,
