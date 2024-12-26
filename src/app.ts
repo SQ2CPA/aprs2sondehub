@@ -4,6 +4,7 @@ import { readFile } from "fs/promises";
 import Settings from "./interface/Settings";
 import { SOFTWARE_NAME, SOFTWARE_VERSION } from "./consts";
 import logger from "./utils/logger";
+import { Mutex } from "async-mutex";
 
 interface Location {
     latitude: number;
@@ -14,7 +15,6 @@ interface Location {
 let settings: Settings;
 
 const sondehubApi = new SondehubApi();
-const aprsisApi = new APRSISApi();
 
 const ignoredStations = [
     "OK2ZAW-17", // repeats everything and delete NOHUB
@@ -66,239 +66,289 @@ function parseCoordinates(packet: string): Location {
 
 const lastKnownLocations: { [key: string]: Location } = {};
 const lastStatusUpdate: { [key: string]: number } = {};
+const lastStatusUpdateMutex = new Mutex();
 
-async function processPacket(packet: string) {
-    const station = packet.split(">")[0];
+const lastSendReceivers: { [key: string]: number } = {};
+const lastSendReceiversMutex = new Mutex();
 
-    if (packet.includes("\n")) return;
+function processPacket(aprsisApi: APRSISApi) {
+    return async function (packet: string) {
+        const station = packet.split(">")[0];
 
-    logger.debug(packet);
+        if (packet.includes("\n")) return;
 
-    if (packet.includes("TCPIP")) return;
+        logger.debug(packet);
 
-    const isNoHub = packet.includes("NOHUB");
+        if (packet.includes("TCPIP")) return;
 
-    if (!isNoHub) {
-        logger.warn(`That's not NOHUB packet, we must ignore that: ${packet}`);
-        return;
-    }
+        const isNoHub = packet.includes("NOHUB");
 
-    const isFromIgnoredStation = !!ignoredStations.find((station) =>
-        packet.includes(station)
-    );
-
-    if (isFromIgnoredStation) {
-        logger.warn(
-            `Packet from ignored station, we don't want that!: ${packet}`
-        );
-        return;
-    }
-
-    if (
-        packet.includes("SNR") ||
-        packet.includes("RSSI") ||
-        packet.includes("snr") ||
-        packet.includes("rssi") ||
-        packet.includes("DP_RSSI") ||
-        packet.includes(" DS ")
-    ) {
-        logger.info(`Got modified packet: ${packet}`);
-
-        if (packet.includes("rssi: ")) {
-            packet = packet.split(" rssi:")[0];
-            packet = packet.split("rssi:")[0];
-        } else if (packet.includes("DP_RSSI: ")) {
-            packet = packet.split(" DP_RSSI:")[0];
-        } else if (packet.includes(" DS ")) {
-            packet = packet.split(" DS ")[0];
-        } else if (packet.includes("  SNR=")) {
-            packet = packet.split("  SNR=")[0];
-        } else {
+        if (!isNoHub) {
+            logger.warn(
+                `That's not NOHUB packet, we must ignore that: ${packet}`
+            );
             return;
         }
 
-        logger.info(`Packet cleaned as: ${packet}`);
-    }
-
-    if (!packet.includes("/P")) {
-        logger.info(`Skipping broken packet: ${packet}`);
-        return;
-    }
-
-    const balloon = settings.balloons.find(
-        (balloon) => balloon.hamCallsign === station
-    );
-
-    if (!balloon) return;
-
-    if (!balloon.active) return;
-
-    logger.info(`Got packet: ${packet}`);
-
-    const receiver = packet.match(/,([a-zA-Z0-9-]+)\:./)[1];
-
-    const comment = packet.split("/").pop();
-
-    const frame = extractIfAvailable(comment, /P([0-9]+)/);
-
-    const satellites = extractIfAvailable(comment, /S([0-9]+)/);
-
-    const power = extractIfAvailable(comment, /O([0-9]+)/) || 20;
-
-    const flightNumber = extractIfAvailable(comment, /N([0-9]+)/);
-
-    const timeToFix = extractIfAvailable(comment, /FT([-0-9]+)/);
-
-    const temperature = extractIfAvailable(comment, /(?<!F)T([-0-9]+)/);
-
-    const voltage = extractIfAvailable(comment, /V([0-9]{3})/);
-
-    const frequency = extractIfAvailable(comment, /F([0-9]+)/);
-
-    const time = new Date();
-
-    let altitudeInFeet = extractIfAvailable(packet, /A=([0-9]+)\//);
-    let altitudeInMeters = altitudeInFeet / 3.281;
-
-    const timeDifference = Math.abs(
-        new Date().getTime() - new Date(balloon.launchDate).getTime()
-    );
-
-    const daysAloft = Math.ceil(timeDifference / (1000 * 60 * 60 * 24));
-
-    let { latitude, longitude } = parseCoordinates(packet);
-
-    const hasFix = !(!latitude || !longitude);
-
-    if (hasFix) {
-        lastKnownLocations[balloon.hamCallsign] = {
-            latitude,
-            longitude,
-            altitude: altitudeInMeters,
-        };
-    }
-
-    const lastKnownLocation = lastKnownLocations[balloon.hamCallsign];
-
-    if (!lastKnownLocation) {
-        logger.warn(
-            `Got packet without location for: ${balloon.payload} but we'll skip due to lack of known location`
+        const isFromIgnoredStation = !!ignoredStations.find((station) =>
+            packet.includes(station)
         );
-        return;
-    } else if (!hasFix) {
-        latitude = lastKnownLocation.latitude;
-        longitude = lastKnownLocation.longitude;
-        altitudeInMeters = lastKnownLocation.altitude;
-        altitudeInFeet = altitudeInMeters * 3.281;
-    }
 
-    logger.info(`Got packet for: ${balloon.payload}`);
-
-    const telemetry: TelemetryPayload = {
-        software_name: SOFTWARE_NAME,
-        software_version: SOFTWARE_VERSION,
-        comment: balloon.comment,
-        detail: balloon.detail,
-        device: balloon.device,
-        modulation: "APRS",
-        time_received: time.toISOString(),
-        datetime: time.toISOString(),
-        payload_callsign: balloon.payload,
-        lat: latitude,
-        lon: longitude,
-        alt: altitudeInMeters,
-        sats: satellites || 0,
-        uploader_callsign: receiver,
-        launch_date: balloon.launchDate,
-        days_aloft: daysAloft,
-        has_fix: hasFix ? "1" : "0",
-        flight_number: String(flightNumber),
-        power,
-        frame,
-    };
-
-    if (temperature !== null) telemetry.temp = temperature;
-    if (!!voltage) telemetry.batt = voltage / 100;
-
-    if (timeToFix !== null) telemetry.time_to_fix = timeToFix;
-
-    if (!!frequency) {
-        switch (frequency) {
-            case 1:
-                telemetry.frequency = 433.775;
-                telemetry.lora_speed = 300;
-                telemetry.modulation = "LoRa APRS";
-                break;
-            case 2:
-                telemetry.frequency = 434.855;
-                telemetry.lora_speed = 1200;
-                telemetry.modulation = "LoRa APRS";
-                break;
-            case 3:
-                telemetry.frequency = 439.9125;
-                telemetry.lora_speed = 300;
-                telemetry.modulation = "LoRa APRS";
-                break;
-            case 4:
-                telemetry.frequency = 144.8;
-                telemetry.modulation = "AFSK APRS";
-                break;
-            case 5:
-                telemetry.frequency = 144.39;
-                telemetry.modulation = "AFSK APRS";
-                break;
-            case 6:
-                telemetry.frequency = 145.57;
-                telemetry.modulation = "AFSK APRS";
-                break;
-            case 7:
-                telemetry.frequency = 144.64;
-                telemetry.modulation = "AFSK APRS";
-                break;
-            case 8:
-                telemetry.frequency = 144.66;
-                telemetry.modulation = "AFSK APRS";
-                break;
-            case 9:
-                telemetry.frequency = 145.525;
-                telemetry.modulation = "AFSK APRS";
-                break;
-            case 10:
-                telemetry.frequency = 144.575;
-                telemetry.modulation = "AFSK APRS";
-                break;
-            case 11:
-                telemetry.frequency = 145.175;
-                telemetry.modulation = "AFSK APRS";
-                break;
+        if (isFromIgnoredStation) {
+            logger.warn(
+                `Packet from ignored station, we don't want that!: ${packet}`
+            );
+            return;
         }
-    }
 
-    await sondehubApi.uploadTelemetry([telemetry]);
+        if (
+            packet.includes("SNR") ||
+            packet.includes("RSSI") ||
+            packet.includes("snr") ||
+            packet.includes("rssi") ||
+            packet.includes("DP_RSSI") ||
+            packet.includes(" DS ")
+        ) {
+            logger.info(`Got modified packet: ${packet}`);
 
-    if (
-        !lastStatusUpdate[balloon.payload] ||
-        Date.now() - lastStatusUpdate[balloon.payload] > 15 * 60 * 1000
-    ) {
-        await aprsisApi.sendStatus(
-            balloon.hamCallsign,
-            "https://amateur.sondehub.org/" + balloon.payload
+            if (packet.includes("rssi: ")) {
+                packet = packet.split(" rssi:")[0];
+                packet = packet.split("rssi:")[0];
+            } else if (packet.includes("DP_RSSI: ")) {
+                packet = packet.split(" DP_RSSI:")[0];
+            } else if (packet.includes(" DS ")) {
+                packet = packet.split(" DS ")[0];
+            } else if (packet.includes("  SNR=")) {
+                packet = packet.split("  SNR=")[0];
+            } else {
+                return;
+            }
+
+            logger.info(`Packet cleaned as: ${packet}`);
+        }
+
+        if (!packet.includes("/P")) {
+            logger.info(`Skipping broken packet: ${packet}`);
+            return;
+        }
+
+        const balloon = settings.balloons.find(
+            (balloon) => balloon.hamCallsign === station
         );
 
-        lastStatusUpdate[balloon.payload] = Date.now();
-    }
+        if (!balloon) return;
+
+        if (!balloon.active) return;
+
+        logger.debug(`Got packet: ${packet}`);
+
+        const receiver = packet.match(/,([a-zA-Z0-9-]+)\:./)[1];
+
+        const release1 = await lastSendReceiversMutex.acquire();
+
+        if (
+            !!lastSendReceivers[receiver] &&
+            Date.now() - lastSendReceivers[receiver] < 30 * 1000
+        ) {
+            await release1();
+            return;
+        }
+
+        lastSendReceivers[receiver] = Date.now();
+
+        await release1();
+
+        const comment = packet.split("/").pop();
+
+        const frame = extractIfAvailable(comment, /P([0-9]+)/);
+
+        const satellites = extractIfAvailable(comment, /S([0-9]+)/);
+
+        const power = extractIfAvailable(comment, /O([0-9]+)/) || 20;
+
+        const flightNumber = extractIfAvailable(comment, /N([0-9]+)/);
+
+        const timeToFix = extractIfAvailable(comment, /FT([-0-9]+)/);
+
+        const temperature = extractIfAvailable(comment, /(?<!F)T([-0-9]+)/);
+
+        const voltage = extractIfAvailable(comment, /V([0-9]{3})/);
+
+        const frequency = extractIfAvailable(comment, /F([0-9]+)/);
+
+        let altitudeInFeet = extractIfAvailable(packet, /A=([0-9]+)\//);
+        let altitudeInMeters = altitudeInFeet / 3.281;
+
+        const timeDifference = Math.abs(
+            new Date().getTime() - new Date(balloon.launchDate).getTime()
+        );
+
+        const daysAloft = Math.ceil(timeDifference / (1000 * 60 * 60 * 24));
+
+        let { latitude, longitude } = parseCoordinates(packet);
+
+        const hasFix = !(!latitude || !longitude);
+
+        if (hasFix) {
+            lastKnownLocations[balloon.hamCallsign] = {
+                latitude,
+                longitude,
+                altitude: altitudeInMeters,
+            };
+        }
+
+        const lastKnownLocation = lastKnownLocations[balloon.hamCallsign];
+
+        if (!lastKnownLocation) {
+            logger.warn(
+                `Got packet without location for: ${balloon.payload} but we'll skip due to lack of known location`
+            );
+            return;
+        } else if (!hasFix) {
+            latitude = lastKnownLocation.latitude;
+            longitude = lastKnownLocation.longitude;
+            altitudeInMeters = lastKnownLocation.altitude;
+            altitudeInFeet = altitudeInMeters * 3.281;
+        }
+
+        logger.info(
+            `Got unique receiver ${receiver} packet for payload ${balloon.payload}`
+        );
+
+        const time = new Date();
+
+        const telemetry: TelemetryPayload = {
+            software_name: SOFTWARE_NAME,
+            software_version: SOFTWARE_VERSION,
+            comment: balloon.comment,
+            detail: balloon.detail,
+            device: balloon.device,
+            modulation: "APRS",
+            time_received: time.toISOString(),
+            datetime: time.toISOString(),
+            payload_callsign: balloon.payload,
+            lat: latitude,
+            lon: longitude,
+            alt: altitudeInMeters,
+            sats: satellites || 0,
+            uploader_callsign: receiver,
+            launch_date: balloon.launchDate,
+            days_aloft: daysAloft,
+            has_fix: hasFix ? "1" : "0",
+            flight_number: String(flightNumber),
+            power,
+            frame,
+        };
+
+        if (temperature !== null) telemetry.temp = temperature;
+        if (!!voltage) telemetry.batt = voltage / 100;
+
+        if (timeToFix !== null) telemetry.time_to_fix = timeToFix;
+
+        if (!!frequency) {
+            switch (frequency) {
+                case 1:
+                    telemetry.frequency = 433.775;
+                    telemetry.lora_speed = 300;
+                    telemetry.modulation = "LoRa APRS";
+                    break;
+                case 2:
+                    telemetry.frequency = 434.855;
+                    telemetry.lora_speed = 1200;
+                    telemetry.modulation = "LoRa APRS";
+                    break;
+                case 3:
+                    telemetry.frequency = 439.9125;
+                    telemetry.lora_speed = 300;
+                    telemetry.modulation = "LoRa APRS";
+                    break;
+                case 4:
+                    telemetry.frequency = 144.8;
+                    telemetry.modulation = "AFSK APRS";
+                    break;
+                case 5:
+                    telemetry.frequency = 144.39;
+                    telemetry.modulation = "AFSK APRS";
+                    break;
+                case 6:
+                    telemetry.frequency = 145.57;
+                    telemetry.modulation = "AFSK APRS";
+                    break;
+                case 7:
+                    telemetry.frequency = 144.64;
+                    telemetry.modulation = "AFSK APRS";
+                    break;
+                case 8:
+                    telemetry.frequency = 144.66;
+                    telemetry.modulation = "AFSK APRS";
+                    break;
+                case 9:
+                    telemetry.frequency = 145.525;
+                    telemetry.modulation = "AFSK APRS";
+                    break;
+                case 10:
+                    telemetry.frequency = 144.575;
+                    telemetry.modulation = "AFSK APRS";
+                    break;
+                case 11:
+                    telemetry.frequency = 145.175;
+                    telemetry.modulation = "AFSK APRS";
+                    break;
+            }
+        }
+
+        try {
+            await sondehubApi.uploadTelemetry([telemetry]);
+        } catch (err) {
+            console.error(err);
+        }
+
+        const release2 = await lastStatusUpdateMutex.acquire();
+
+        if (
+            !lastStatusUpdate[balloon.payload] ||
+            Date.now() - lastStatusUpdate[balloon.payload] > 15 * 60 * 1000
+        ) {
+            await aprsisApi.sendStatus(
+                balloon.hamCallsign,
+                "https://amateur.sondehub.org/" + balloon.payload
+            );
+
+            lastStatusUpdate[balloon.payload] = Date.now();
+        }
+
+        await release2();
+    };
 }
 
 (async function () {
     await loadSettings();
 
-    aprsisApi.setCallback(processPacket);
+    const servers = (await readFile("./servers.txt", "utf-8"))
+        .split(/\r?\n/g)
+        .filter(Boolean);
+
+    console.log(`Got: ${servers.length} APRSIS servers`);
 
     const callsigns = settings.balloons.map((balloon) => balloon.hamCallsign);
 
-    while (true) {
-        await aprsisApi.startStream(settings.callsign, callsigns);
+    await Promise.all(
+        servers.map(async (host) => {
+            const aprsisApi = new APRSISApi(host);
 
-        logger.debug(`Reconnecting to APRSIS..`);
-    }
+            aprsisApi.setCallback(processPacket(aprsisApi));
+
+            const connectedAt = Date.now();
+
+            while (true) {
+                await aprsisApi.startStream(settings.callsign, callsigns);
+
+                if (Date.now() - connectedAt < 10000) break;
+
+                logger.debug(`Reconnecting to ${host}`);
+            }
+
+            logger.debug(`APRSIS server ${host} failed, exiting..`);
+        })
+    );
 })();

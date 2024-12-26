@@ -1,13 +1,14 @@
-import { filter } from "cheerio/dist/commonjs/api/traversing";
-import Balloon from "../interface/Balloon";
 import net from "net";
-import logger from "../utils/logger";
 
 export default class APRSISApi {
     private connection = new net.Socket();
     private callback: Function = null;
 
-    constructor() {}
+    constructor(private readonly host = "euro.aprs2.net") {}
+
+    public getHost() {
+        return this.host;
+    }
 
     public setCallback(callback: Function) {
         this.callback = callback;
@@ -88,8 +89,6 @@ export default class APRSISApi {
 
         const passcode = this.getPasscode(callsign);
 
-        console.log(`Connecting to APRSIS as ${callsign}`);
-
         this.connection.on("data", async (d) => {
             const packet: string = d.toString().trim();
 
@@ -98,9 +97,7 @@ export default class APRSISApi {
             this.callback(packet);
         });
 
-        this.connection.connect(14580, "euro.aprs2.net");
-
-        console.log(`Connected to APRSIS!`);
+        this.connection.connect(14580, this.host);
 
         this.connection.write(
             "user " +
@@ -112,13 +109,30 @@ export default class APRSISApi {
                 "\r\n"
         );
 
+        this.connection.on("error", (err) => {
+            console.log(
+                `Failed to connect to APRSIS server ${this.host}:14580`
+            );
+            console.error(err);
+        });
+
+        this.connection.on("connect", () =>
+            console.log(`Connected to APRSIS server ${this.host}:14580`)
+        );
+
         return new Promise<void>((r) => this.connection.on("close", r));
     }
 
     async sendStatus(callsign: string, status: string) {
-        const packet2 = `${callsign}>APZHUB,NOHUB,TCPIP,qAC:>${status}`;
+        try {
+            const packet = `${callsign}>APZHUB,NOHUB,TCPIP,qAC:>${status}`;
 
-        // console.log(packet2);
-        await this.connection.write(packet2 + "\r\n");
+            if (!this.connection.closed)
+                await this.connection.write(packet + "\r\n");
+
+            return true;
+        } catch {
+            return false;
+        }
     }
 }
