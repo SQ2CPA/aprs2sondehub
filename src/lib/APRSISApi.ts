@@ -130,6 +130,7 @@ export default class APRSISApi {
         ]);
 
         this.connection.end();
+        this.connection.removeAllListeners();
     }
 
     async sendStatus(callsign: string, status: string) {

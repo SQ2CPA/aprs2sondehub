@@ -40,6 +40,7 @@ export interface TelemetryPayload {
     frame: number;
     lora_speed?: number;
     distance_traveled?: string;
+    solar_elevation: string;
 }
 
 const BASE_URL = "https://api.v2.sondehub.org";

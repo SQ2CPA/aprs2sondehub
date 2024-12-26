@@ -5,6 +5,8 @@ import Settings from "./interface/Settings";
 import { SOFTWARE_NAME, SOFTWARE_VERSION } from "./consts";
 import logger from "./utils/logger";
 import { Mutex } from "async-mutex";
+import UtilsApi from "./lib/UtilsApi";
+import SolarElevationApi from "./lib/SolarElevationApi";
 
 interface Location {
     latitude: number;
@@ -15,6 +17,7 @@ interface Location {
 let settings: Settings;
 
 const sondehubApi = new SondehubApi();
+const solarElevationApi = new SolarElevationApi();
 
 const ignoredStations = [
     "OK2ZAW-17", // repeats everything and delete NOHUB
@@ -221,6 +224,13 @@ function processPacket(aprsisApi: APRSISApi) {
 
         const time = new Date();
 
+        const solarElevation = solarElevationApi.calculate(
+            time,
+            latitude,
+            longitude,
+            altitudeInMeters
+        );
+
         const telemetry: TelemetryPayload = {
             software_name: SOFTWARE_NAME,
             software_version: SOFTWARE_VERSION,
@@ -242,6 +252,7 @@ function processPacket(aprsisApi: APRSISApi) {
             flight_number: String(flightNumber),
             power,
             frame,
+            solar_elevation: solarElevation.toFixed(1),
         };
 
         if (temperature !== null) telemetry.temp = temperature;
