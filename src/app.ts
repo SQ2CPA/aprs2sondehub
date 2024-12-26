@@ -176,6 +176,10 @@ function processPacket(aprsisApi: APRSISApi) {
 
         const frequency = extractIfAvailable(comment, /F([0-9]+)/);
 
+        let distanceTraveled = extractIfAvailable(comment, /ODO=([0-9]+)k?km/);
+
+        if (/ODO=([0-9]+)kkm/.test(comment)) distanceTraveled *= 1000;
+
         let altitudeInFeet = extractIfAvailable(packet, /A=([0-9]+)\//);
         let altitudeInMeters = altitudeInFeet / 3.281;
 
@@ -242,6 +246,9 @@ function processPacket(aprsisApi: APRSISApi) {
 
         if (temperature !== null) telemetry.temp = temperature;
         if (!!voltage) telemetry.batt = voltage / 100;
+
+        if (!!distanceTraveled)
+            telemetry.distance_traveled = distanceTraveled + " km";
 
         if (timeToFix !== null) telemetry.time_to_fix = timeToFix;
 
