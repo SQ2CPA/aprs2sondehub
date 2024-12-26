@@ -118,10 +118,10 @@ export default class APRSISApi {
         await Promise.race([
             new Promise<void>((r) =>
                 this.connection.on("error", (err) => {
-                    console.log(
-                        `Failed to connect to APRSIS server ${this.host}:14580`
-                    );
-                    console.error(err);
+                    // console.log(
+                    //     `Failed to connect to APRSIS server ${this.host}:14580`
+                    // );
+                    // console.error(err);
 
                     r();
                 })
