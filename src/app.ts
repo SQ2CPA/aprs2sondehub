@@ -307,6 +307,8 @@ function processPacket(aprsisApi: APRSISApi) {
         try {
             await sondehubApi.uploadTelemetry([telemetry]);
         } catch (err) {
+            logger.warn(`Failed to send telemetry to sondehub`);
+            logger.debug(JSON.stringify(telemetry));
             console.error(err);
         }
 
@@ -316,10 +318,15 @@ function processPacket(aprsisApi: APRSISApi) {
             !lastStatusUpdate[balloon.payload] ||
             Date.now() - lastStatusUpdate[balloon.payload] > 15 * 60 * 1000
         ) {
-            await aprsisApi.sendStatus(
-                balloon.hamCallsign,
-                "https://amateur.sondehub.org/" + balloon.payload
-            );
+            try {
+                await aprsisApi.sendStatus(
+                    balloon.hamCallsign,
+                    "https://amateur.sondehub.org/" + balloon.payload
+                );
+            } catch (err) {
+                logger.warn(`Failed to send APRS status`);
+                console.error(err);
+            }
 
             lastStatusUpdate[balloon.payload] = Date.now();
         }
@@ -339,23 +346,33 @@ function processPacket(aprsisApi: APRSISApi) {
 
     const callsigns = settings.balloons.map((balloon) => balloon.hamCallsign);
 
+    let connected = servers.length;
+
     await Promise.all(
         servers.map(async (host) => {
             const aprsisApi = new APRSISApi(host);
 
             aprsisApi.setCallback(processPacket(aprsisApi));
 
-            const connectedAt = Date.now();
-
             while (true) {
+                const connectedAt = Date.now();
+
                 await aprsisApi.startStream(settings.callsign, callsigns);
 
                 if (Date.now() - connectedAt < 10000) break;
 
+                logger.debug(
+                    `Disconnected from ${host}, reconnecting after 15s...`
+                );
+
+                await new Promise((r) => setTimeout(r, 15 * 1000));
+
                 logger.debug(`Reconnecting to ${host}`);
             }
 
-            logger.debug(`APRSIS server ${host} failed, exiting..`);
+            logger.warn(`APRSIS server ${host} failed, exiting..`);
+
+            if (--connected < 50) process.exit();
         })
     );
 })();

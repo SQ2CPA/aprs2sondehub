@@ -97,6 +97,8 @@ export default class APRSISApi {
             this.callback(packet);
         });
 
+        this.connection.setTimeout(5000);
+
         this.connection.connect(14580, this.host);
 
         this.connection.write(
@@ -109,18 +111,25 @@ export default class APRSISApi {
                 "\r\n"
         );
 
-        this.connection.on("error", (err) => {
-            console.log(
-                `Failed to connect to APRSIS server ${this.host}:14580`
-            );
-            console.error(err);
-        });
-
         this.connection.on("connect", () =>
             console.log(`Connected to APRSIS server ${this.host}:14580`)
         );
 
-        return new Promise<void>((r) => this.connection.on("close", r));
+        await Promise.race([
+            new Promise<void>((r) =>
+                this.connection.on("error", (err) => {
+                    console.log(
+                        `Failed to connect to APRSIS server ${this.host}:14580`
+                    );
+                    console.error(err);
+
+                    r();
+                })
+            ),
+            new Promise<void>((r) => this.connection.on("close", r)),
+        ]);
+
+        this.connection.end();
     }
 
     async sendStatus(callsign: string, status: string) {
