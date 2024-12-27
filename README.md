@@ -12,6 +12,10 @@ MCU's in our balloon are not the best, we can't fit all functions onboard so I w
 
 This script is likely to be used with: [https://github.com/SQ2CPA/RS41_APRS](https://github.com/SQ2CPA/RS41_APRS)
 
+## Conflict with Sondehub APRSIS Gateway
+
+If you want to use this script you MUST use `NOHUB` path in all your balloon APRS frames! Otherwise you and sondehub will be both sending the frames and there will be a lot of mess because of that!
+
 ## Features
 
 Of cource the main feature is to upload data from WSPR spots to SondeHub Amateur but it also:
