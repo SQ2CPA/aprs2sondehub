@@ -5,8 +5,8 @@ import Settings from "./interface/Settings";
 import { SOFTWARE_NAME, SOFTWARE_VERSION } from "./consts";
 import logger from "./utils/logger";
 import { Mutex } from "async-mutex";
-import UtilsApi from "./lib/UtilsApi";
 import SolarElevationApi from "./lib/SolarElevationApi";
+import APRSTelemetryApi from "./lib/APRSTelemetryApi";
 
 interface Location {
     latitude: number;
@@ -18,14 +18,17 @@ let settings: Settings;
 
 const sondehubApi = new SondehubApi();
 const solarElevationApi = new SolarElevationApi();
+const telemetryApi = new APRSTelemetryApi();
 
 const ignoredStations = [
     "OK2ZAW-17", // repeats everything and delete NOHUB
     "OK1CMJ-14", // repeats everything and delete NOHUB
+    "HB3YGT-10", // removes NOHUB
     "OK2ULQ-11", // CRC packets
     "OK2R-12", // CRC packets
     "OK1TPG-27", // CRC packets
-    "SR9SRC-2", // short packet
+    "SR9SRC-2", // short packet,
+    "DL6UMF-L", // uploading frames with delay like >24 hours
 ];
 
 async function loadSettings() {
@@ -69,10 +72,15 @@ function parseCoordinates(packet: string): Location {
 
 const lastKnownLocations: { [key: string]: Location } = {};
 const lastStatusUpdate: { [key: string]: number } = {};
-const lastStatusUpdateMutex = new Mutex();
+const statusUpdateMutex = new Mutex();
 
 const lastSendReceivers: { [key: string]: number } = {};
-const lastSendReceiversMutex = new Mutex();
+const receiversMutex = new Mutex();
+
+const lastSendTelemetry: { [key: string]: number } = {};
+const lastTelemetryFrame: { [key: string]: number } = {};
+const sendInitialTelemetry: string[] = [];
+const telemetryMutex = new Mutex();
 
 function processPacket(aprsisApi: APRSISApi) {
     return async function (packet: string) {
@@ -147,7 +155,7 @@ function processPacket(aprsisApi: APRSISApi) {
 
         const receiver = packet.match(/,([a-zA-Z0-9-]+)\:./)[1];
 
-        const release1 = await lastSendReceiversMutex.acquire();
+        const release1 = await receiversMutex.acquire();
 
         if (
             !!lastSendReceivers[receiver] &&
@@ -323,7 +331,7 @@ function processPacket(aprsisApi: APRSISApi) {
             console.error(err);
         }
 
-        const release2 = await lastStatusUpdateMutex.acquire();
+        const release2 = await statusUpdateMutex.acquire();
 
         if (
             !lastStatusUpdate[balloon.payload] ||
@@ -343,6 +351,44 @@ function processPacket(aprsisApi: APRSISApi) {
         }
 
         await release2();
+
+        const release3 = await telemetryMutex.acquire();
+
+        if (!sendInitialTelemetry.includes(balloon.hamCallsign)) {
+            const packets = await telemetryApi.getInitialFrames(
+                balloon.hamCallsign
+            );
+
+            for (const packet of packets) {
+                await aprsisApi.sendPacket(packet);
+            }
+
+            sendInitialTelemetry.push(balloon.hamCallsign);
+            lastTelemetryFrame[balloon.hamCallsign] = 0;
+        }
+
+        if (
+            !lastSendTelemetry[balloon.hamCallsign] ||
+            Date.now() - lastSendTelemetry[balloon.hamCallsign] > 30 * 1000
+        ) {
+            const packet = await telemetryApi.getTelemetryFrame(
+                balloon.hamCallsign,
+                temperature || 0,
+                !voltage ? 0 : voltage / 100,
+                solarElevation,
+                ++lastTelemetryFrame[balloon.hamCallsign]
+            );
+
+            if (lastTelemetryFrame[balloon.hamCallsign] >= 255) {
+                lastTelemetryFrame[balloon.hamCallsign] = 0;
+            }
+
+            await aprsisApi.sendPacket(packet);
+
+            lastSendTelemetry[balloon.hamCallsign] = Date.now();
+        }
+
+        await release3();
     };
 }
 

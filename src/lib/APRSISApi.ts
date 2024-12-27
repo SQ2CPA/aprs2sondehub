@@ -133,12 +133,16 @@ export default class APRSISApi {
         this.connection.removeAllListeners();
     }
 
+    async sendPacket(packet: string) {
+        if (!this.connection.closed)
+            await this.connection.write(packet + "\r\n");
+    }
+
     async sendStatus(callsign: string, status: string) {
         try {
             const packet = `${callsign}>APZHUB,NOHUB,TCPIP,qAC:>${status}`;
 
-            if (!this.connection.closed)
-                await this.connection.write(packet + "\r\n");
+            await this.sendPacket(packet);
 
             return true;
         } catch {
