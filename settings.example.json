@@ -1,0 +1,15 @@
+{
+    "callsign": "N0CALL",
+    "uploadToSondehub": true,
+    "balloons": [
+        {
+            "active": true,
+            "payload": "N0CALL-11",
+            "hamCallsign": "N0CALL-11",
+            "comment": "My first APRS tracker",
+            "detail": "Tracker v1",
+            "launchDate": "2023-12-24",
+            "device": "APRS LoRa & AFSK"
+        }
+    ]
+}
