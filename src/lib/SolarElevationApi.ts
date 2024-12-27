@@ -68,8 +68,6 @@ export default class SolarElevationApi {
     }
 
     public calculate(date: Date, lat: number, lng: number, ht: number) {
-        ht /= rad;
-
         const lw = rad * -lng,
             phi = rad * lat,
             d = this.suncalc_toDays(date),
@@ -80,6 +78,8 @@ export default class SolarElevationApi {
             this.suncalc_altitude(H, phi, c.dec) +
             acos(earthradm / (earthradm + ht));
 
-        return this.suncalc_azimuth(H, phi, c.dec);
+        // return this.suncalc_azimuth(H, phi, c.dec);
+
+        return altitude / rad;
     }
 }
