@@ -29,6 +29,11 @@ const ignoredStations = [
     "OK1TPG-27", // CRC packets
     "SR9SRC-2", // short packet,
     "DL6UMF-L", // uploading frames with delay like >24 hours
+    "DL8FX-L", // uploading frames with delay like >24 hours
+    "DK8ZV-10", // uploading frames with delay
+    "HB9AK-11", // CRC packets
+    "HB9GNC-10", // CRC packets
+    "EA5IVT-15", // uploading frames with delay
 ];
 
 async function loadSettings() {
@@ -264,7 +269,7 @@ function processPacket(aprsisApi: APRSISApi) {
         };
 
         if (temperature !== null) telemetry.temp = temperature;
-        if (!!voltage) telemetry.batt = voltage / 100;
+        if (!!voltage) telemetry.solar_panel = voltage / 100;
 
         if (!!distanceTraveled)
             telemetry.distance_traveled = distanceTraveled + " km";

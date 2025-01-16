@@ -25,7 +25,7 @@ export interface TelemetryPayload {
     lat: number;
     lon: number;
     alt: number;
-    batt?: number;
+    solar_panel?: number;
     sats?: number;
     gps?: number;
     temp?: number;
