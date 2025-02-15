@@ -75,7 +75,6 @@ function parseCoordinates(packet: string): Location {
     return { latitude, longitude };
 }
 
-const lastKnownLocations: { [key: string]: Location } = {};
 const lastStatusUpdate: { [key: string]: number } = {};
 const statusUpdateMutex = new Mutex();
 
@@ -87,6 +86,32 @@ const lastTelemetryFrame: { [key: string]: number } = {};
 const sendInitialTelemetry: string[] = [];
 const telemetryMutex = new Mutex();
 
+function isCorrectTime(packet: string) {
+    const now = new Date();
+
+    if (packet.includes("/000000h")) return true;
+
+    const value = packet.match(/\/(\d{2})(\d{2})(\d{2})h/);
+    if (!value) return true;
+
+    const [, hh, mm, ss] = value.map(Number);
+
+    const date = new Date(
+        Date.UTC(
+            now.getUTCFullYear(),
+            now.getUTCMonth(),
+            now.getUTCDate(),
+            hh,
+            mm,
+            ss
+        )
+    );
+
+    const diffSeconds = Math.abs((now.getTime() - date.getTime()) / 1000);
+
+    return diffSeconds <= 60;
+}
+
 function processPacket(aprsisApi: APRSISApi) {
     return async function (packet: string) {
         const station = packet.split(">")[0];
@@ -96,6 +121,11 @@ function processPacket(aprsisApi: APRSISApi) {
         logger.debug(packet);
 
         if (packet.includes("TCPIP")) return;
+
+        packet = packet.replace("XOchman", "");
+        packet = packet.replace("Thanks to", "");
+        packet = packet.replace("Thanks", "");
+        packet = packet.trim();
 
         const isNoHub = packet.includes("NOHUB");
 
@@ -143,6 +173,12 @@ function processPacket(aprsisApi: APRSISApi) {
             logger.info(`Packet cleaned as: ${packet}`);
         }
 
+        if (/,([a-zA-Z0-9-]+)\:\>/.test(packet)) {
+            logger.debug(`Skipping status packet: ${packet}`);
+
+            return;
+        }
+
         if (!packet.includes("/P")) {
             logger.info(`Skipping broken packet: ${packet}`);
             return;
@@ -155,6 +191,11 @@ function processPacket(aprsisApi: APRSISApi) {
         if (!balloon) return;
 
         if (!balloon.active) return;
+
+        if (!isCorrectTime(packet)) {
+            logger.info(`Skipping delayed packet: ${packet}`);
+            return;
+        }
 
         logger.debug(`Got packet: ${packet}`);
 
@@ -186,7 +227,9 @@ function processPacket(aprsisApi: APRSISApi) {
 
         const timeToFix = extractIfAvailable(comment, /FT([-0-9]+)/);
 
-        const temperature = extractIfAvailable(comment, /(?<!F)T([-0-9]+)/);
+        let temperature = extractIfAvailable(comment, /(?<!F)T([-0-9]+)/);
+
+        if (temperature < -100 || temperature > 50) temperature = null;
 
         const voltage = extractIfAvailable(comment, /V([0-9]{3})/);
 
@@ -209,26 +252,11 @@ function processPacket(aprsisApi: APRSISApi) {
 
         const hasFix = !(!latitude || !longitude);
 
-        if (hasFix) {
-            lastKnownLocations[balloon.hamCallsign] = {
-                latitude,
-                longitude,
-                altitude: altitudeInMeters,
-            };
-        }
-
-        const lastKnownLocation = lastKnownLocations[balloon.hamCallsign];
-
-        if (!lastKnownLocation) {
+        if (!hasFix) {
             logger.warn(
-                `Got packet without location for: ${balloon.payload} but we'll skip due to lack of known location`
+                `Got packet without location for: ${balloon.payload} (from ${receiver})`
             );
             return;
-        } else if (!hasFix) {
-            latitude = lastKnownLocation.latitude;
-            longitude = lastKnownLocation.longitude;
-            altitudeInMeters = lastKnownLocation.altitude;
-            altitudeInFeet = altitudeInMeters * 3.281;
         }
 
         logger.info(
