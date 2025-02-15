@@ -86,13 +86,13 @@ const lastTelemetryFrame: { [key: string]: number } = {};
 const sendInitialTelemetry: string[] = [];
 const telemetryMutex = new Mutex();
 
-function isCorrectTime(packet: string) {
+function getTimeDelay(packet: string) {
     const now = new Date();
 
-    if (packet.includes("/000000h")) return true;
+    if (packet.includes("/000000h")) return 0;
 
     const value = packet.match(/\/(\d{2})(\d{2})(\d{2})h/);
-    if (!value) return true;
+    if (!value) return 0;
 
     const [, hh, mm, ss] = value.map(Number);
 
@@ -109,7 +109,7 @@ function isCorrectTime(packet: string) {
 
     const diffSeconds = Math.abs((now.getTime() - date.getTime()) / 1000);
 
-    return diffSeconds <= 60;
+    return diffSeconds;
 }
 
 function processPacket(aprsisApi: APRSISApi) {
@@ -192,8 +192,10 @@ function processPacket(aprsisApi: APRSISApi) {
 
         if (!balloon.active) return;
 
-        if (!isCorrectTime(packet)) {
-            logger.info(`Skipping delayed packet: ${packet}`);
+        const timeDelay = getTimeDelay(packet);
+
+        if (timeDelay > 60) {
+            logger.info(`Skipping delayed packet (${timeDelay.toFixed(0)}s): ${packet}`);
             return;
         }
 
