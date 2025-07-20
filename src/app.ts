@@ -34,6 +34,7 @@ const ignoredStations = [
     "HB9AK-11", // CRC packets
     "HB9GNC-10", // CRC packets
     "EA5IVT-15", // uploading frames with delay
+    "OM6ACB-1",
 ];
 
 async function loadSettings() {
@@ -127,6 +128,14 @@ function processPacket(aprsisApi: APRSISApi) {
         packet = packet.replace("Thanks", "");
         packet = packet.trim();
 
+        if (packet.includes(":{{")) {
+            return;
+        }
+
+        if (packet.includes("::")) {
+            return;
+        }
+
         const isNoHub = packet.includes("NOHUB");
 
         if (!isNoHub) {
@@ -195,7 +204,9 @@ function processPacket(aprsisApi: APRSISApi) {
         const timeDelay = getTimeDelay(packet);
 
         if (timeDelay > 60) {
-            logger.info(`Skipping delayed packet (${timeDelay.toFixed(0)}s): ${packet}`);
+            logger.info(
+                `Skipping delayed packet (${timeDelay.toFixed(0)}s): ${packet}`
+            );
             return;
         }
 
@@ -225,7 +236,8 @@ function processPacket(aprsisApi: APRSISApi) {
 
         const power = extractIfAvailable(comment, /O([0-9]+)/) || 20;
 
-        const flightNumber = extractIfAvailable(comment, /N([0-9]+)/);
+        const flightNumber =
+            extractIfAvailable(comment, /N([0-9]+)/) || undefined;
 
         const timeToFix = extractIfAvailable(comment, /FT([-0-9]+)/);
 
@@ -292,7 +304,7 @@ function processPacket(aprsisApi: APRSISApi) {
             launch_date: balloon.launchDate,
             days_aloft: daysAloft,
             has_fix: hasFix ? "1" : "0",
-            flight_number: String(flightNumber),
+            flight_number: !flightNumber ? undefined : String(flightNumber),
             power,
             frame,
             solar_elevation: solarElevation.toFixed(1),
@@ -325,35 +337,35 @@ function processPacket(aprsisApi: APRSISApi) {
                     break;
                 case 4:
                     telemetry.frequency = 144.8;
-                    telemetry.modulation = "AFSK APRS";
+                    telemetry.modulation = "APRS";
                     break;
                 case 5:
                     telemetry.frequency = 144.39;
-                    telemetry.modulation = "AFSK APRS";
+                    telemetry.modulation = "APRS";
                     break;
                 case 6:
                     telemetry.frequency = 145.57;
-                    telemetry.modulation = "AFSK APRS";
+                    telemetry.modulation = "APRS";
                     break;
                 case 7:
                     telemetry.frequency = 144.64;
-                    telemetry.modulation = "AFSK APRS";
+                    telemetry.modulation = "APRS";
                     break;
                 case 8:
                     telemetry.frequency = 144.66;
-                    telemetry.modulation = "AFSK APRS";
+                    telemetry.modulation = "APRS";
                     break;
                 case 9:
                     telemetry.frequency = 145.525;
-                    telemetry.modulation = "AFSK APRS";
+                    telemetry.modulation = "APRS";
                     break;
                 case 10:
                     telemetry.frequency = 144.575;
-                    telemetry.modulation = "AFSK APRS";
+                    telemetry.modulation = "APRS";
                     break;
                 case 11:
                     telemetry.frequency = 145.175;
-                    telemetry.modulation = "AFSK APRS";
+                    telemetry.modulation = "APRS";
                     break;
             }
         }

@@ -1,0 +1,42 @@
+{
+    "callsign": "SP0LND",
+    "uploadToSondehub": true,
+    "balloons": [
+        {
+            "active": true,
+            "payload": "SP0LND-1",
+            "hamCallsign": "SP0LND-1",
+            "comment": "Check QRZ page",
+            "detail": "Based on RS41 components",
+            "launchDate": "2024-12-13",
+            "device": "APRS LoRa & AFSK"
+        },
+        {
+            "active": true,
+            "payload": "SP0LND-2",
+            "hamCallsign": "SP0LND-2",
+            "comment": "Check QRZ page",
+            "detail": "Based on RS41 components",
+            "launchDate": "2024-12-25",
+            "device": "APRS LoRa & AFSK"
+        },
+        {
+            "active": true,
+            "payload": "SP0LND-3",
+            "hamCallsign": "SP0LND-3",
+            "comment": "Check QRZ page",
+            "detail": "Based on RS41 components",
+            "launchDate": "2025-01-12",
+            "device": "APRS LoRa & AFSK"
+        },
+        {
+            "active": true,
+            "payload": "SP0LND-4",
+            "hamCallsign": "SP0LND-4",
+            "comment": "Check QRZ page",
+            "detail": "Thanks to XOchman!",
+            "launchDate": "2025-01-24",
+            "device": "APRS LoRa & AFSK"
+        }
+    ]
+}
